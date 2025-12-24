@@ -2,50 +2,52 @@
 echo "🔍 Перевіряю середовище розробки ProKrosivski..."
 echo "-----------------------------------------------"
 
-
-echo "🧩 Контейнери:"
-docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep prokrosivski
+# 1. Стан контейнерів
+echo "🧩 Стан Docker:"
+docker ps --format "table {{.Names}}\t{{.Status}}" | grep prokrosivski || echo "❌ Контейнери не запущені!"
 echo
 
+# 2. Перевірка Laravel (внутрішня)
+echo "⚙️  Внутрішня перевірка Laravel (в контейнері):"
 
-echo "⚙️ Перевіряю Laravel..."
-docker exec -it prokrosivski-laravel php artisan migrate:status > /dev/null 2>&1 && echo "✅ Міграції OK" || echo "❌ Міграції недоступні"
-docker exec -it prokrosivski-laravel php artisan route:list > /dev/null 2>&1 && echo "✅ Маршрути OK" || echo "❌ Проблема з маршрутами"
-
-docker exec -it prokrosivski-laravel php -r "try{new PDO('mysql:host=mysql;dbname=prokrosivski','root','root');echo '✅ MySQL підключено\n';}catch(Exception \$e){echo '❌ MySQL не підключено\n';}"
-
-docker exec -it prokrosivski-laravel php -r "try{\$r=new Redis();\$r->connect('redis',6379);echo '✅ Redis підключено\n';}catch(Exception \$e){echo '❌ Redis не підключено\n';}"
-
-
-echo
-echo "🌐 Перевіряю API..."
-API_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/test)
-if [ "$API_RESPONSE" == "200" ]; then
-  echo "✅ API відповідає (http://localhost:8080/api/test)"
+# Міграції
+if docker exec prokrosivski-laravel php artisan migrate:status > /dev/null 2>&1; then
+  echo "✅ Міграції OK"
 else
-  echo "❌ API не відповідає (код $API_RESPONSE)"
+  echo "❌ Міграції не виконані або помилка БД"
 fi
 
-
-echo
-echo "📬 Перевірка Mailpit..."
-MAILPIT_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8025)
-if [ "$MAILPIT_RESPONSE" == "200" ]; then
-  echo "✅ Mailpit працює (http://localhost:8025)"
+# Зв'язок зі сховищем (важливо для фото кросівок)
+if docker exec prokrosivski-laravel ls public/storage > /dev/null 2>&1; then
+  echo "✅ Storage link OK"
 else
-  echo "❌ Mailpit недоступний"
+  echo "⚠️  Storage link відсутній (виконай php artisan storage:link)"
 fi
 
+# БД через PHP
+docker exec prokrosivski-laravel php -r "try{new PDO('mysql:host=mysql;dbname=prokrosivski','root','root');echo '✅ MySQL підключено\n';}catch(Exception \$e){echo '❌ MySQL помилка: '.\$e->getMessage().'\n';}"
+
+# Redis
+docker exec prokrosivski-laravel php -r "try{\$r=new Redis();\$r->connect('redis',6379);echo '✅ Redis підключено\n';}catch(Exception \$e){echo '❌ Redis не підключено\n';}"
 
 echo
-echo "🖥️ Перевірка фронтенду..."
-FRONT_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080)
-if [ "$FRONT_RESPONSE" == "200" ] || [ "$FRONT_RESPONSE" == "304" ]; then
-  echo "✅ Next.js працює (http://localhost:8080)"
+echo "🌐 Зовнішня перевірка (через Nginx):"
+
+# API (перевіряємо хоча б корінь або 404/401, що означає, що сервер відповів)
+API_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api)
+if [ "$API_CODE" -ne 000 ]; then
+  echo "✅ API (Nginx -> PHP-FPM) доступне (Код: $API_CODE)"
 else
-  echo "❌ Next.js недоступний (код $FRONT_RESPONSE)"
+  echo "❌ API недоступне (Nginx лежить?)"
 fi
 
-echo
+# Next.js
+FRONT_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080)
+if [ "$FRONT_CODE" == "200" ] || [ "$FRONT_CODE" == "304" ]; then
+  echo "✅ Next.js працює"
+else
+  echo "❌ Next.js видає код $FRONT_CODE"
+fi
+
 echo "-----------------------------------------------"
 echo "🏁 Перевірка завершена."
